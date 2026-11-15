@@ -1,0 +1,332 @@
+plugins {
+    id 'com.android.library' version '8.13.2'
+}
+
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
+
+import javax.inject.Inject
+
+
+def findAndroidSdkDir(Project project) {
+    def sdkDir = null
+    try {
+        sdkDir = project.extensions.findByName("android")?.sdkDirectory
+    } catch (Exception ignored) {}
+    if (!sdkDir || !sdkDir.exists()) {
+        def localProps = new File(project.rootDir, "local.properties")
+        if (localProps.exists()) {
+            def props = new Properties()
+            localProps.withInputStream { props.load(it) }
+            def p = props.getProperty("sdk.dir")
+            if (p) sdkDir = new File(p)
+        }
+    }
+    if (!sdkDir || !sdkDir.exists()) {
+        def envHome = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+        if (envHome) sdkDir = new File(envHome)
+    }
+    return (sdkDir && sdkDir.exists()) ? sdkDir : null
+}
+
+def runGit(Project project, List<String> args) {
+    try {
+        def output = project.providers.exec {
+            commandLine("git", *args)
+            workingDir = project.rootDir
+            ignoreExitValue = true
+        }.standardOutput.asText.get().trim()
+        return output ? output : null
+    } catch (Exception e) {
+        return null
+    }
+}
+
+def getVersionName(Project project) {
+    def envTag = System.getenv("GITHUB_REF_TYPE") == "tag" ? System.getenv("GITHUB_REF_NAME") : null
+    def tag = null
+
+    if (envTag != null && !envTag.isEmpty()) {
+        tag = envTag
+    } else {
+        tag = runGit(project, ["describe", "--tags", "--exact-match"])
+    }
+
+    if (tag != null && !tag.isEmpty()) {
+        if (tag.startsWith("v")) {
+            tag = tag.substring(1)
+        }
+        return tag
+    }
+
+    def date = runGit(project, ["log", "-1", "--format=%cd", "--date=format:%Y%m%d%H%M%S"]) ?: new Date().format("yyyyMMddHHmmss")
+    def commit = runGit(project, ["rev-parse", "--short", "HEAD"]) ?: "unknown"
+
+    return "${date}-${commit}"
+}
+
+android {
+    namespace = 'com.xenomz.xe_extera'
+    compileSdk 35
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    defaultConfig {
+        minSdk 26
+        
+        buildConfigField "String", "XE_EXTERA_VERSION", "\"${getVersionName(project)}\""
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+abstract class AarToDexTask extends DefaultTask {
+    @InputFile
+    @PathSensitive(PathSensitivity.NONE)
+    abstract RegularFileProperty getAarFile()
+
+    @OutputDirectory
+    abstract DirectoryProperty getDexDir()
+
+    @Optional
+    @Input
+    abstract Property<String> getD8Path()
+
+    @Optional
+    @Input
+    abstract Property<String> getBuildToolsVersion()
+
+    @Input
+    abstract Property<Integer> getMinSdk()
+
+    @Optional
+    @InputFile
+    @PathSensitive(PathSensitivity.NONE)
+    abstract RegularFileProperty getAndroidJar()
+
+    @Inject
+    abstract ExecOperations getExecOperations()
+
+    @Inject
+    abstract ArchiveOperations getArchiveOperations()
+
+    @Inject
+    abstract FileSystemOperations getFileSystemOperations()
+
+    @TaskAction
+    def convert() {
+        if (!d8Path.isPresent()) {
+            throw new GradleException("Android SDK not found or d8 is missing. Set sdk.dir in local.properties or ANDROID_HOME.")
+        }
+        if (!androidJar.isPresent() || !androidJar.get().asFile.exists()) {
+            throw new GradleException("android.jar not found for compileSdk. Install the matching Android SDK Platform.")
+        }
+
+        def aar = aarFile.get().asFile
+        def outputDir = dexDir.get().asFile
+        def d8 = d8Path.get()
+        def androidJarFile = androidJar.get().asFile
+        def minSdkVer = minSdk.get()
+
+        def tempDir = new File(temporaryDir, "unpacked_aar")
+        if (tempDir.exists()) {
+            tempDir.deleteDir()
+        }
+        tempDir.mkdirs()
+
+        fileSystemOperations.copy {
+            from archiveOperations.zipTree(aar)
+            into tempDir
+        }
+
+        def classesJar = new File(tempDir, "classes.jar")
+        if (!classesJar.exists()) {
+            throw new GradleException("classes.jar not found inside ${aar.name}")
+        }
+
+        // Remove stale dex files from a previous build with a different class count.
+        if (outputDir.exists()) {
+            outputDir.deleteDir()
+        }
+        outputDir.mkdirs()
+
+        def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
+        def args = [
+            "--output", outputDir.absolutePath,
+            "--lib", androidJarFile.absolutePath,
+            "--min-api", minSdkVer.toString(),
+            classesJar.absolutePath
+        ]
+
+        execOperations.exec {
+            if (isWindows) {
+                commandLine(["cmd", "/c", "\"${d8}\""] + args)
+            } else {
+                commandLine([d8] + args)
+            }
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    if (taskGraph.hasTask(":aarToDex") || taskGraph.hasTask(":buildDex") || taskGraph.hasTask(":assembleRelease")) {
+        def telegramSubmodule = file("libs/Telegram")
+        if (!telegramSubmodule.exists() || !new File(telegramSubmodule, "build.gradle").exists()) {
+            throw new GradleException("Submodule 'libs/Telegram' is not initialized. Run 'git submodule update --init --recursive --depth=1'.")
+        }
+    }
+}
+
+tasks.register("aarToDex", AarToDexTask) {
+    dependsOn "assembleRelease"
+    group = "build"
+    description = "Assembles DEX from AAR module"
+
+    def projName = project.name
+    def layout = project.layout
+    aarFile.set(layout.buildDirectory.file("outputs/aar/${projName}-release.aar"))
+    dexDir.set(layout.buildDirectory.dir("dex"))
+
+    def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
+    def d8BinaryName = isWindows ? "d8.bat" : "d8"
+    // SDK discovery stays best-effort here: tasks like `buildPlugin` and `tasks` must work without a local SDK.
+    def sdkDir = findAndroidSdkDir(project)
+    def resolvedD8 = null
+    def resolvedBuildToolsVersion = null
+    if (sdkDir != null) {
+        def btVer = android.buildToolsVersion
+        if (btVer) {
+            def candidate = new File(sdkDir, "build-tools/${btVer}/${d8BinaryName}")
+            if (candidate.exists()) {
+                resolvedD8 = candidate.absolutePath
+                resolvedBuildToolsVersion = btVer
+            }
+        }
+        if (!resolvedD8) {
+            def buildToolsDir = new File(sdkDir, "build-tools")
+            if (buildToolsDir.isDirectory()) {
+                def parseVersion = { String v ->
+                    v.tokenize(".-").collect { it.isInteger() ? it.toInteger() : 0 }
+                }
+                def latestDir = buildToolsDir.listFiles()
+                    ?.findAll { it.isDirectory() && it.name ==~ /\d+(\.\d+)+/ && new File(it, d8BinaryName).exists() }
+                    ?.max { a, b ->
+                        def va = parseVersion(a.name)
+                        def vb = parseVersion(b.name)
+                        for (int i = 0; i < Math.max(va.size(), vb.size()); i++) {
+                            int pa = i < va.size() ? va[i] : 0
+                            int pb = i < vb.size() ? vb[i] : 0
+                            if (pa != pb) return pa <=> pb
+                        }
+                        return 0
+                    }
+                if (latestDir) {
+                    resolvedD8 = new File(latestDir, d8BinaryName).absolutePath
+                    resolvedBuildToolsVersion = latestDir.name
+                }
+            }
+        }
+    }
+
+    def compileSdkVer = android.compileSdk ?: 35
+    def minSdkVer = android.defaultConfig.minSdk ?: 26
+
+    if (resolvedD8 != null) {
+        d8Path.set(resolvedD8)
+        buildToolsVersion.set(resolvedBuildToolsVersion)
+    }
+    if (sdkDir != null) {
+        androidJar.set(project.file("${sdkDir}/platforms/android-${compileSdkVer}/android.jar"))
+    }
+    minSdk.set(minSdkVer)
+}
+
+tasks.register("buildDex") {
+    group = "build"
+    description = "Builds DEX artifact"
+    dependsOn "aarToDex"
+}
+
+tasks.register("buildPluginPython", Exec) {
+    group = "build"
+    description = "Builds Python loader plugin for exteraGram"
+
+    inputs.files(fileTree("loader/python") {
+        exclude("__pycache__/**")
+        exclude("*.pyc")
+    })
+    outputs.file(project.layout.buildDirectory.file("plugin/loader.plugin"))
+
+    def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
+    commandLine isWindows ? "python" : "python3", "loader/python/build.py"
+}
+
+tasks.register("buildPluginTypescript", Exec) {
+    group = "build"
+    description = "Builds TypeScript loader plugin for Inugram"
+
+    doFirst {
+        def nodeModules = file("loader/typescript/node_modules")
+        if (!nodeModules.exists()) {
+            throw new GradleException("loader/typescript/node_modules is missing. Run 'pnpm --dir loader/typescript install' first.")
+        }
+    }
+
+    workingDir = file("loader/typescript")
+    inputs.files(fileTree("loader/typescript") {
+        exclude("node_modules/**")
+        exclude(".inu/**")
+        exclude(".inu.config.*")
+    })
+    outputs.file(project.layout.buildDirectory.file("plugin/loader.inu.js"))
+
+    def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
+    commandLine isWindows ? ["cmd", "/c", "pnpm run build"] : ["pnpm", "run", "build"]
+}
+
+tasks.register("buildPlugin") {
+    group = "build"
+    description = "Builds loader plugins (exteraGram Python and Inugram TypeScript)"
+
+    def target = project.findProperty("target") ?: project.findProperty("plugin") ?: "all"
+    if (target == "python") {
+        dependsOn "buildPluginPython"
+    } else if (target == "typescript" || target == "ts") {
+        dependsOn "buildPluginTypescript"
+    } else {
+        dependsOn "buildPluginPython", "buildPluginTypescript"
+    }
+}
+
+repositories {
+    mavenCentral()
+    google()
+    maven { url = 'https://maven.aliucord.com/snapshots' }
+}
+dependencies {
+    compileOnly 'org.telegram:TMessagesProj'
+    compileOnly files('libs/exteragram.jar')
+    compileOnly 'com.aliucord:Aliuhook:1.1.3'
+    compileOnly 'androidx.appcompat:appcompat:1.7.1'
+    compileOnly 'com.google.android.material:material:1.13.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
+}

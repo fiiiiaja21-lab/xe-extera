@@ -1,0 +1,17 @@
+package com.xenomz.xe_extera.hooks.navigation;
+
+import de.robv.android.xposed.XC_MethodHook;
+import com.xenomz.xe_extera.utils.GhostMenuHelper;
+import org.telegram.ui.ActionBar.BaseFragment;
+
+public class DrawerMenuGhostHook extends XC_MethodHook {
+    public void afterHookedMethod(XC_MethodHook.MethodHookParam param) {
+        Object obj = param.thisObject;
+        if (obj == null) {
+            return;
+        }
+        int currentAccount = ((Integer) param.args[0]).intValue();
+        BaseFragment fragment = (BaseFragment) param.args[1];
+        GhostMenuHelper.injectIntoDrawer(obj, currentAccount, fragment);
+    }
+}

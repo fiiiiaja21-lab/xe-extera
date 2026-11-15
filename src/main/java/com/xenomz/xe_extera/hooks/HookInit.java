@@ -1,0 +1,463 @@
+package com.xenomz.xe_extera.hooks;
+
+import android.content.Context;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import androidx.collection.LongSparseArray;
+import com.exteragram.messenger.plugins.Plugin;
+import com.exteragram.messenger.plugins.PythonPluginsEngine;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
+import com.xenomz.xe_extera.Main;
+import com.xenomz.xe_extera.hooks.chatactivity.AddToSelectedMessagesHook;
+import com.xenomz.xe_extera.hooks.chatactivity.HasSelectedNoForwardsMessage;
+import com.xenomz.xe_extera.hooks.chatactivity.IsPeerNoForwards;
+import com.xenomz.xe_extera.hooks.chatactivity.NotificationCenterDidLoad;
+import com.xenomz.xe_extera.hooks.chatactivity.ProcessDeletedMessages;
+import com.xenomz.xe_extera.hooks.chatactivity.ProcessNewMessages;
+import com.xenomz.xe_extera.hooks.chatactivity.exclusions.FragmentCreate;
+import com.xenomz.xe_extera.hooks.chatactivity.menuhook.CreateMenuHook;
+import com.xenomz.xe_extera.hooks.chatactivity.menuhook.FillMessageMenu;
+import com.xenomz.xe_extera.hooks.chatactivity.menuhook.ProcessSelectedOption;
+import com.xenomz.xe_extera.hooks.chatactivity.secretmedia.SendSecretMediaDelete;
+import com.xenomz.xe_extera.hooks.chatactivity.secretmedia.SendSecretMessageRead;
+import com.xenomz.xe_extera.hooks.chatmessagecell.DidPressButton;
+import com.xenomz.xe_extera.hooks.chatmessagecell.MeasureTime;
+import com.xenomz.xe_extera.hooks.chatmessagecell.SecretVoicePlayerDismiss;
+import com.xenomz.xe_extera.hooks.connectionsmanager.SendRequest;
+import com.xenomz.xe_extera.hooks.dialogcell.FilterDialogCellPreview;
+import com.xenomz.xe_extera.hooks.dialogsactivity.DialogsActivityHook;
+import com.xenomz.xe_extera.hooks.dialogsactivity.GetDialogsArray;
+import com.xenomz.xe_extera.hooks.fileloader.PreventDeletedStreamLoop;
+import com.xenomz.xe_extera.hooks.messagesstorage.DeleteDialogHook;
+import com.xenomz.xe_extera.hooks.messagescontroller.DeleteDialogControllerHook;
+import com.xenomz.xe_extera.hooks.messagesstorage.DeleteMessagesRangeHook;
+import com.xenomz.xe_extera.hooks.messagesstorage.MarkMessagesAsDeletedInternal;
+import com.xenomz.xe_extera.hooks.messagesstorage.MarkMessagesAsDeletedInternalRange;
+import com.xenomz.xe_extera.hooks.messagesstorage.UpdateDialogsWithDeletedMessages;
+import com.xenomz.xe_extera.hooks.flagsecure.FlagSecureReasonAttach;
+import com.xenomz.xe_extera.hooks.flagsecure.WindowManagerImpl;
+import com.xenomz.xe_extera.hooks.flagsecure.WindowSetFlags;
+import com.xenomz.xe_extera.hooks.messageobject.CanDeleteMessage;
+import com.xenomz.xe_extera.hooks.messageobject.CanForwardMessage;
+import com.xenomz.xe_extera.hooks.messagescontroller.CheckDeletingTask;
+import com.xenomz.xe_extera.hooks.messagescontroller.DeleteMessages;
+import com.xenomz.xe_extera.hooks.messagescontroller.FilterShadowbannedDialogs;
+import com.xenomz.xe_extera.hooks.messagescontroller.IsChatNoForwards;
+import com.xenomz.xe_extera.hooks.messagescontroller.IsUserNoForwards;
+import com.xenomz.xe_extera.hooks.messagescontroller.ProcessLoadedDialogs;
+import com.xenomz.xe_extera.hooks.messagescontroller.ProcessUpdates;
+import com.xenomz.xe_extera.hooks.messagescontroller.PreserveOneTimeMessages;
+import com.xenomz.xe_extera.hooks.messagescontroller.SortDialogsHook;
+import com.xenomz.xe_extera.hooks.navigation.AppNavigationGhostEditorHook;
+import com.xenomz.xe_extera.hooks.navigation.DrawerMenuGhostHook;
+import com.xenomz.xe_extera.hooks.notificationmanager.FilterShadowbannedNotifications;
+import com.xenomz.xe_extera.hooks.notificationmanager.RemoveDeletedMessagesFromNotification;
+import com.xenomz.xe_extera.hooks.pluginsengine.OpenSettingsHook;
+import com.xenomz.xe_extera.hooks.profileactivity.ProfileMenuShadowban;
+import com.xenomz.xe_extera.hooks.profileactivity.UpdateProfileData;
+import com.xenomz.xe_extera.hooks.sendmessageshelper.SendMessage;
+import com.xenomz.xe_extera.hooks.sendmessageshelper.SendMessageForwardHook;
+import com.xenomz.xe_extera.hooks.userconfig.isPremium;
+import com.xenomz.xe_extera.hooks.usercell.HideOwnOnlineStatus;
+import com.xenomz.xe_extera.settings.Settings;
+import com.xenomz.xe_extera.utils.GhostMenuHelper;
+import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.FileStreamLoadOperation;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.FlagSecureReason;
+import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MessageSuggestionParams;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.NotificationsController;
+import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.messenger.UserConfig;
+import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLObject;
+import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.Cells.ChatMessageCell;
+import org.telegram.ui.Cells.DialogCell;
+import org.telegram.ui.Cells.ManageChatUserCell;
+import org.telegram.ui.Cells.UserCell;
+import org.telegram.ui.Cells.UserCell2;
+import org.telegram.ui.ChatActivity;
+import org.telegram.ui.Components.ItemOptions;
+import org.telegram.ui.Components.UItem;
+import org.telegram.ui.Components.UniversalAdapter;
+import org.telegram.ui.DialogsActivity;
+import org.telegram.ui.ProfileActivity;
+import org.telegram.ui.SecretVoicePlayer;
+
+public final class HookInit {
+    private final ArrayList<XC_MethodHook.Unhook> hooks = new ArrayList<>();
+    public XC_MethodHook.Unhook sendRequestHook;
+    private NotificationCenter.NotificationCenterDelegate activeAccountObserver;
+    private NotificationCenter.NotificationCenterDelegate fileLoadedObserver;
+    private final ArrayList<Integer> fileLoadedAccounts = new ArrayList<>();
+
+    /* JADX INFO: Access modifiers changed from: private */
+    @FunctionalInterface
+    interface HookRegistrar {
+        XC_MethodHook.Unhook register() throws Throwable;
+    }
+
+    public static boolean isActive = true;
+
+    public void init() {
+        isActive = true;
+        try {
+            startIntercepting();
+        } catch (Exception e) {
+            Main.log("Fail on startIntercepting: %s", e.getMessage());
+        }
+    }
+
+    private void addHook(XC_MethodHook.Unhook hook) {
+        if (hook != null) {
+            this.hooks.add(hook);
+        }
+    }
+
+    private void tryAddHook(String name, HookRegistrar registrar) {
+        try {
+            addHook(registrar.register());
+        } catch (Throwable e) {
+            Main.log("Failed to hook %s: %s", name, e.getMessage());
+        }
+    }
+
+    private void tryHook(String name, final Class<?> clazz, final String methodName, final XC_MethodHook hook, final Class<?>... parameterTypes) {
+        tryAddHook(name, new HookRegistrar() { 
+            @Override // com.xenomz.xe_extera.hooks.HookInit.HookRegistrar
+            public final XC_MethodHook.Unhook register() {
+                try {
+                    return XposedBridge.hookMethod(clazz.getDeclaredMethod(methodName, parameterTypes), hook);
+                } catch (NoSuchMethodException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+    }
+
+    private void tryHookByArgCount(String name, final Class<?> clazz, final String methodName, final int paramCount, final XC_MethodHook hook) {
+        tryAddHook(name, new HookRegistrar() {
+            @Override
+            public final XC_MethodHook.Unhook register() {
+                java.lang.reflect.Method m = com.xenomz.xe_extera.utils.HookLookup.findByArgCount(clazz, methodName, paramCount);
+                if (m == null) {
+                    com.xenomz.xe_extera.utils.HookLookup.logMiss(name, clazz, methodName);
+                    throw new RuntimeException(new NoSuchMethodException(clazz.getName() + "." + methodName + " with " + paramCount + " args"));
+                }
+                return XposedBridge.hookMethod(m, hook);
+            }
+        });
+    }
+
+    private void tryHookByMinArgCount(String name, final Class<?> clazz, final String methodName, final int minParamCount, final XC_MethodHook hook) {
+        tryAddHook(name, new HookRegistrar() {
+            @Override
+            public final XC_MethodHook.Unhook register() {
+                java.lang.reflect.Method m = com.xenomz.xe_extera.utils.HookLookup.findByMinArgCount(clazz, methodName, minParamCount);
+                if (m == null) {
+                    com.xenomz.xe_extera.utils.HookLookup.logMiss(name, clazz, methodName);
+                    throw new RuntimeException(new NoSuchMethodException(clazz.getName() + "." + methodName + " with >= " + minParamCount + " args"));
+                }
+                return XposedBridge.hookMethod(m, hook);
+            }
+        });
+    }
+
+    public void startSendRequestHook() {
+        int hooked = 0;
+        for (java.lang.reflect.Method method : ConnectionsManager.class.getDeclaredMethods()) {
+            Class<?>[] parameterTypes = method.getParameterTypes();
+            if (!"sendRequestInternal".equals(method.getName()) || parameterTypes.length == 0 || !TLObject.class.isAssignableFrom(parameterTypes[0])) {
+                continue;
+            }
+            try {
+                method.setAccessible(true);
+                XC_MethodHook.Unhook unhook = XposedBridge.hookMethod(method, new SendRequest());
+                addHook(unhook);
+                if (this.sendRequestHook == null) {
+                    this.sendRequestHook = unhook;
+                }
+                hooked++;
+            } catch (Throwable e) {
+                Main.log("Failed to hook ConnectionsManager.%s: %s", method.getName(), e.getMessage());
+            }
+        }
+        if (hooked == 0) {
+            Main.log("Failed to find ConnectionsManager.sendRequestInternal", new Object[0]);
+        }
+    }
+
+    public void startIntercepting() {
+        startSendRequestHook();
+        tryHook("MessagesController.processUpdates", MessagesController.class, "processUpdates", new ProcessUpdates(), TLRPC.Updates.class, Boolean.TYPE);
+        tryHook("MessagesController.processUpdateArray", MessagesController.class, "processUpdateArray", new PreserveOneTimeMessages(), ArrayList.class, ArrayList.class, ArrayList.class, Boolean.TYPE, Integer.TYPE);
+        tryHook("MessagesController.putUsers", MessagesController.class, "putUsers", new com.xenomz.xe_extera.hooks.messagescontroller.PutUsers(), ArrayList.class, Boolean.TYPE);
+        tryHook("MessagesController.isChatNoForwards(Chat)", MessagesController.class, "isChatNoForwards", new IsChatNoForwards(), TLRPC.Chat.class);
+        tryHook("MessagesController.isChatNoForwards(long)", MessagesController.class, "isChatNoForwards", new IsChatNoForwards(), Long.TYPE);
+        tryHook("MessagesController.isUserNoForwards", MessagesController.class, "isUserNoForwards", new IsUserNoForwards(), TLRPC.UserFull.class);
+        tryHook("MessagesController.isUserNoForwards(long)", MessagesController.class, "isUserNoForwards", new IsUserNoForwards(), Long.TYPE);
+        tryHook("MessagesController.isPeerNoForwards(long)", MessagesController.class, "isPeerNoForwards", new IsPeerNoForwards(), Long.TYPE);
+        tryHook("MessagesController.checkDeletingTask", MessagesController.class, "checkDeletingTask", new CheckDeletingTask(), Boolean.TYPE);
+        tryHookByMinArgCount("MessagesController.deleteMessages", MessagesController.class, "deleteMessages", 7, new DeleteMessages());
+        tryHook("MessagesController.getDialogs", MessagesController.class, "getDialogs", new FilterShadowbannedDialogs(), Integer.TYPE);
+        tryHook("MessagesController.sortDialogs", MessagesController.class, "sortDialogs", new SortDialogsHook(), LongSparseArray.class);
+        tryHook("MessagesController.processLoadedDialogs", MessagesController.class, "processLoadedDialogs", new ProcessLoadedDialogs(), TLRPC.messages_Dialogs.class, ArrayList.class, ArrayList.class, Integer.TYPE, Integer.TYPE, Integer.TYPE, Integer.TYPE, Boolean.TYPE, Boolean.TYPE, Boolean.TYPE);
+        tryHook("SecretVoicePlayer.dismiss", SecretVoicePlayer.class, "dismiss", new SecretVoicePlayerDismiss(), new Class[0]);
+        // Telegram 12.9.0 changed method signatures and obfuscated internal methods.
+        // markMessagesAsDeleted: (long, ArrayList, boolean, boolean, int, int)
+        tryHook("MessagesStorage.markMessagesAsDeleted", MessagesStorage.class, "markMessagesAsDeleted", new MarkMessagesAsDeletedInternal(), Long.TYPE, ArrayList.class, Boolean.TYPE, Boolean.TYPE, Integer.TYPE, Integer.TYPE);
+        // Fallbacks for older Telegram versions
+        tryHook("MessagesStorage.markMessagesAsDeletedInternal", MessagesStorage.class, "markMessagesAsDeletedInternal", new MarkMessagesAsDeletedInternal(), Long.TYPE, ArrayList.class, Boolean.TYPE, Integer.TYPE, Integer.TYPE);
+        // Range deletions: markMessagesAsDeleted(long did, int maxMid, boolean isChannel, boolean isTopic)
+        tryHook("MessagesStorage.markMessagesAsDeleted(range)", MessagesStorage.class, "markMessagesAsDeleted", new MarkMessagesAsDeletedInternalRange(), Long.TYPE, Integer.TYPE, Boolean.TYPE, Boolean.TYPE);
+        tryHook("MessagesStorage.markMessagesAsDeletedInternal(range)", MessagesStorage.class, "markMessagesAsDeletedInternal", new MarkMessagesAsDeletedInternalRange(), Long.TYPE, Integer.TYPE, Boolean.TYPE);
+        // Set ThreadLocal flag for entire deleteMessagesRange call to skip stack trace scanning in range hooks
+        tryHook("MessagesController.deleteMessagesRange", MessagesController.class, "deleteMessagesRange", new DeleteMessagesRangeHook(), Long.TYPE, Long.TYPE, Integer.TYPE, Integer.TYPE, Boolean.TYPE, Runnable.class);
+        tryHook("MessagesController.deleteDialog", MessagesController.class, "deleteDialog", new DeleteDialogControllerHook(), Long.TYPE, Integer.TYPE, Boolean.TYPE);
+        tryHook("MessagesStorage.deleteDialog", MessagesStorage.class, "deleteDialog", new DeleteDialogHook(), Long.TYPE, Integer.TYPE);
+
+        // updateDialogsWithDeletedMessages: (long, long, ArrayList, ArrayList)
+        tryHook("MessagesStorage.updateDialogsWithDeletedMessages", MessagesStorage.class, "updateDialogsWithDeletedMessages", new UpdateDialogsWithDeletedMessages(), Long.TYPE, Long.TYPE, ArrayList.class, ArrayList.class);
+        // Fallbacks for older Telegram versions
+        tryHook("MessagesStorage.updateDialogsWithDeletedMessages_old", MessagesStorage.class, "updateDialogsWithDeletedMessages", new UpdateDialogsWithDeletedMessages(), Long.TYPE, Long.TYPE, ArrayList.class, ArrayList.class, Boolean.TYPE);
+        tryHook("MessagesStorage.updateDialogsWithDeletedMessagesInternal", MessagesStorage.class, "updateDialogsWithDeletedMessagesInternal", new UpdateDialogsWithDeletedMessages(), Long.TYPE, Long.TYPE, ArrayList.class, ArrayList.class);
+        tryHook("ChatMessageCell.didPressButton", ChatMessageCell.class, "didPressButton", new DidPressButton(), Boolean.TYPE, Boolean.TYPE);
+        tryHook("ChatMessageCell.measureTime", ChatMessageCell.class, "measureTime", new MeasureTime(), MessageObject.class);
+        tryHookByArgCount("FileLoader.loadStreamFile", FileLoader.class, "loadStreamFile", 8, new PreventDeletedStreamLoop.LoadStreamFileHook());
+        tryHookByArgCount("FileStreamLoadOperation.open", FileStreamLoadOperation.class, "open", 1, new PreventDeletedStreamLoop.OpenHook());
+        tryHook("UserConfig.isPremium", UserConfig.class, "isPremium", new isPremium(), new Class[0]);
+        tryHookByArgCount("UserConfig.setCurrentUser", UserConfig.class, "setCurrentUser", 1, new isPremium.SetCurrentUserHook());
+        tryHookByArgCount("MessagesController.putUser(2arg)", MessagesController.class, "putUser", 2, new isPremium.PutUserHook());
+        tryHookByArgCount("MessagesController.putUser(3arg)", MessagesController.class, "putUser", 3, new isPremium.PutUserHook());
+        tryHookByArgCount("MessagesController.putUsers(premium)", MessagesController.class, "putUsers", 2, new isPremium.PutUsersHook());
+        tryHookByArgCount("MessagesStorage.putUsersInternal", MessagesStorage.class, "putUsersInternal", 1, new isPremium.PutUsersInternalHook());
+        for (final java.lang.reflect.Method saveConfigLambda : isPremium.findSaveConfigLambdas()) {
+            tryAddHook("UserConfig." + saveConfigLambda.getName(), new HookRegistrar() {
+                @Override
+                public XC_MethodHook.Unhook register() {
+                    return XposedBridge.hookMethod(saveConfigLambda, new isPremium.SaveConfigHook());
+                }
+            });
+        }
+        try {
+            Class<?> clazz = Class.forName("android.view.WindowManagerImpl");
+            tryHook("WindowManagerImpl.addView", clazz, "addView", new WindowManagerImpl(), View.class, ViewGroup.LayoutParams.class);
+        } catch (ClassNotFoundException e) {
+            Main.log("WindowManagerImpl not found: %s", e.getMessage());
+        }
+        tryHook("Window.setFlags", Window.class, "setFlags", new WindowSetFlags(), Integer.TYPE, Integer.TYPE);
+        tryHook("FlagSecureReason.attach", FlagSecureReason.class, "attach", new FlagSecureReasonAttach(), new Class[0]);
+        tryHook("SendMessagesHelper.sendMessage(params)", SendMessagesHelper.class, "sendMessage", new SendMessage(), SendMessagesHelper.SendMessageParams.class);
+        tryHook("SendMessagesHelper.sendMessage(forwards)", SendMessagesHelper.class, "sendMessage", new SendMessageForwardHook(), ArrayList.class, Long.TYPE, Boolean.TYPE, Boolean.TYPE, Boolean.TYPE, Integer.TYPE, Integer.TYPE, MessageObject.class, Integer.TYPE, Long.TYPE, Long.TYPE, MessageSuggestionParams.class);
+        tryHook("NotificationsController.removeDeletedMessagesFromNotifications", NotificationsController.class, "removeDeletedMessagesFromNotifications", new RemoveDeletedMessagesFromNotification(), LongSparseArray.class, Boolean.TYPE);
+        tryHook("NotificationsController.processNewMessages", NotificationsController.class, "processNewMessages", new FilterShadowbannedNotifications(), ArrayList.class, Boolean.TYPE, Boolean.TYPE, CountDownLatch.class);
+        tryHook("MessageObject.canDeleteMessage", MessageObject.class, "canDeleteMessage", new CanDeleteMessage(), Boolean.TYPE, TLRPC.Chat.class);
+        tryHook("MessageObject.canForwardMessage", MessageObject.class, "canForwardMessage", new CanForwardMessage(), new Class[0]);
+        tryHook("ChatActivity.isPeerNoForwards", ChatActivity.class, "isPeerNoForwards", new IsPeerNoForwards(), new Class[0]);
+        tryHookByMinArgCount("ChatActivity.createMenu", ChatActivity.class, "createMenu", 6, new CreateMenuHook());
+        tryHookByMinArgCount("ChatActivity.addToSelectedMessages", ChatActivity.class, "addToSelectedMessages", 2, new AddToSelectedMessagesHook());
+        tryHook("ChatActivity.fillMessageMenu", ChatActivity.class, "fillMessageMenu", new FillMessageMenu(), MessageObject.class, ArrayList.class, ArrayList.class, ArrayList.class);
+        tryHook("ChatActivity.processSelectedOption", ChatActivity.class, "processSelectedOption", new ProcessSelectedOption(), Integer.TYPE);
+        tryHook("LocaleController.formatUserStatus", LocaleController.class, "formatUserStatus", new com.xenomz.xe_extera.hooks.localecontroller.FormatUserStatus(), Integer.TYPE, TLRPC.User.class, boolean[].class, boolean[].class, boolean[].class);
+        tryHook("LocaleController.formatUserStatus(4arg)", LocaleController.class, "formatUserStatus", new com.xenomz.xe_extera.hooks.localecontroller.FormatUserStatus(), Integer.TYPE, TLRPC.User.class, boolean[].class, boolean[].class);
+        tryHook("ChatActivity.createView", ChatActivity.class, "createView", new FragmentCreate(), Context.class);
+        tryHook("ChatActivity.hasSelectedNoforwardsMessage", ChatActivity.class, "hasSelectedNoforwardsMessage", new HasSelectedNoForwardsMessage(), new Class[0]);
+        tryHook("ChatActivity.sendSecretMediaDelete", ChatActivity.class, "sendSecretMediaDelete", new SendSecretMediaDelete(), MessageObject.class);
+        tryHook("ChatActivity.sendSecretMessageRead", ChatActivity.class, "sendSecretMessageRead", new SendSecretMessageRead(), MessageObject.class, Boolean.TYPE);
+        tryHook("MessagesController.markMentionMessageAsRead", MessagesController.class, "markMentionMessageAsRead", new com.xenomz.xe_extera.hooks.messagescontroller.MarkMentionMessageAsReadHook(), Integer.TYPE, Long.TYPE, Long.TYPE);
+        tryHook("ChatActivity.processDeletedMessages", ChatActivity.class, "processDeletedMessages", new ProcessDeletedMessages(), ArrayList.class, Long.TYPE, Boolean.TYPE, Boolean.TYPE);
+        tryHook("ChatActivity.processNewMessages", ChatActivity.class, "processNewMessages", new ProcessNewMessages(), ArrayList.class, Boolean.TYPE);
+        tryHook("ChatActivity.didReceivedNotification", ChatActivity.class, "didReceivedNotification", new NotificationCenterDidLoad(), Integer.TYPE, Integer.TYPE, Object[].class);
+        tryHook("DialogCell.update", DialogCell.class, "update", new FilterDialogCellPreview(), Integer.TYPE, Boolean.TYPE);
+        tryHook("ManageChatUserCell.update", ManageChatUserCell.class, "update", new HideOwnOnlineStatus(), Integer.TYPE);
+        tryHook("UserCell.update", UserCell.class, "update", new HideOwnOnlineStatus(), Integer.TYPE);
+        tryHook("UserCell2.update", UserCell2.class, "update", new HideOwnOnlineStatus(), Integer.TYPE);
+        tryHook("DialogsActivity.getDialogsArray", DialogsActivity.class, "getDialogsArray", new GetDialogsArray(), Integer.TYPE, Integer.TYPE, Integer.TYPE, Boolean.TYPE);
+        tryHook("DialogsActivity.addMainMenuConfiguredItems", DialogsActivity.class, "addMainMenuConfiguredItems", new DialogsActivityHook(DialogsActivityHook.Mode.ADD_ITEMS), ItemOptions.class);
+        tryHook("DialogsActivity.addMainMenuConfiguredItem", DialogsActivity.class, "addMainMenuConfiguredItem", new DialogsActivityHook(DialogsActivityHook.Mode.ADD_ITEM), ItemOptions.class, Integer.TYPE);
+        
+        try {
+            Class<?> mainMenuHelperClass = Class.forName("com.exteragram.messenger.utils.chats.MainMenuHelper");
+            Class<?> menuContextClass = Class.forName("com.exteragram.messenger.utils.chats.MainMenuHelper$MenuContext");
+            
+            // Hook 2-argument version
+            tryHook("MainMenuHelper.addConfiguredItemOptions", mainMenuHelperClass, "addConfiguredItemOptions", new DialogsActivityHook(DialogsActivityHook.Mode.ADD_ITEMS), ItemOptions.class, menuContextClass);
+            // Hook 3-argument version (used by MainTabsActivity)
+            tryHook("MainMenuHelper.addConfiguredItemOptions(IntPredicate)", mainMenuHelperClass, "addConfiguredItemOptions", new DialogsActivityHook(DialogsActivityHook.Mode.ADD_ITEMS), ItemOptions.class, menuContextClass, java.util.function.IntPredicate.class);
+            
+            tryHook("MainMenuHelper.addConfiguredItemOption", mainMenuHelperClass, "addConfiguredItemOption", new DialogsActivityHook(DialogsActivityHook.Mode.ADD_ITEM), ItemOptions.class, menuContextClass, Integer.TYPE);
+        } catch (ClassNotFoundException e) {
+            Main.log("MainMenuHelper not found, using legacy DialogsActivity hooks only");
+        }
+        tryHook("ProfileActivity.updateProfileData", ProfileActivity.class, "updateProfileData", new UpdateProfileData(), Boolean.TYPE);
+        tryHook("MessagesController.getSponsoredMessages", MessagesController.class, "getSponsoredMessages", new com.xenomz.xe_extera.hooks.messagescontroller.DisableAds(), Long.TYPE);
+        
+        tryHook("UserObject.getColorId", org.telegram.messenger.UserObject.class, "getColorId", new com.xenomz.xe_extera.hooks.peercolor.DisableColoredReplies.UserColorId(), TLRPC.User.class);
+        tryHook("UserObject.getEmojiId", org.telegram.messenger.UserObject.class, "getEmojiId", new com.xenomz.xe_extera.hooks.peercolor.DisableColoredReplies.UserEmojiId(), TLRPC.User.class);
+        tryHook("ChatObject.getColorId", org.telegram.messenger.ChatObject.class, "getColorId", new com.xenomz.xe_extera.hooks.peercolor.DisableColoredReplies.ChatColorId(), TLRPC.Chat.class);
+        tryHook("ChatObject.getEmojiId", org.telegram.messenger.ChatObject.class, "getEmojiId", new com.xenomz.xe_extera.hooks.peercolor.DisableColoredReplies.ChatEmojiId(), TLRPC.Chat.class);
+        
+        tryHook("ChatMessageCell.setMessageObject", org.telegram.ui.Cells.ChatMessageCell.class, "setMessageObject", new com.xenomz.xe_extera.hooks.chatmessagecell.TransparentDeletedMessages(), MessageObject.class, MessageObject.GroupedMessages.class, Boolean.TYPE, Boolean.TYPE, Boolean.TYPE, Boolean.TYPE);
+        tryHook("ChatMessageCell.onMeasure", org.telegram.ui.Cells.ChatMessageCell.class, "onMeasure", new com.xenomz.xe_extera.hooks.chatmessagecell.HideFilteredCell(), Integer.TYPE, Integer.TYPE);
+        tryHook("ChatMessageCell.setAlpha", org.telegram.ui.Cells.ChatMessageCell.class, "setAlpha", new com.xenomz.xe_extera.hooks.chatmessagecell.TransparentDeletedMessagesAlpha(), Float.TYPE);
+        
+        tryHookByArgCount("StoryViewer.open(9)", org.telegram.ui.Stories.StoryViewer.class, "open", 9, new com.xenomz.xe_extera.hooks.storyviewer.StoryViewerHook.OpenHook());
+        tryHookByArgCount("StoryViewer.open(8)", org.telegram.ui.Stories.StoryViewer.class, "open", 8, new com.xenomz.xe_extera.hooks.storyviewer.StoryViewerHook.OpenHook());
+        tryHook("StoryViewer.close", org.telegram.ui.Stories.StoryViewer.class, "close", new com.xenomz.xe_extera.hooks.storyviewer.StoryViewerHook.CloseHook(), Boolean.TYPE);
+        tryHook("StoryViewer.instantClose", org.telegram.ui.Stories.StoryViewer.class, "instantClose", new com.xenomz.xe_extera.hooks.storyviewer.StoryViewerHook.CloseHook(), new Class[0]);
+        tryHook("StoryViewer.allowScreenshots", org.telegram.ui.Stories.StoryViewer.class, "allowScreenshots", new com.xenomz.xe_extera.hooks.storyviewer.StorySaveHooks.AllowScreenshotsHook(), Boolean.TYPE);
+        tryHook("StoryItemHolder.allowScreenshots", org.telegram.ui.Stories.PeerStoriesView.StoryItemHolder.class, "allowScreenshots", new com.xenomz.xe_extera.hooks.storyviewer.StorySaveHooks.HolderAllowScreenshotsHook(), new Class[0]);
+        tryHook("PeerStoriesView.saveToGallery", org.telegram.ui.Stories.PeerStoriesView.class, "saveToGallery", new com.xenomz.xe_extera.hooks.storyviewer.StorySaveHooks.SaveToGalleryHook(), new Class[0]);
+        registerFileLoadedObserver();
+        
+        tryHook("MessagesController.markDialogAsRead", MessagesController.class, "markDialogAsRead", new com.xenomz.xe_extera.hooks.messagescontroller.MarkDialogAsRead(), Long.TYPE, Integer.TYPE, Integer.TYPE, Integer.TYPE, Boolean.TYPE, Long.TYPE, Integer.TYPE, Boolean.TYPE, Integer.TYPE);
+        
+        tryHook("ConnectionsManager.setAppPaused", org.telegram.tgnet.ConnectionsManager.class, "setAppPaused", new com.xenomz.xe_extera.hooks.connectionsmanager.WorkInBackground(), Boolean.TYPE, Boolean.TYPE);
+        
+        tryHook("ProfileActivity.createActionBarMenu", ProfileActivity.class, "createActionBarMenu", new ProfileMenuShadowban(), Boolean.TYPE);
+        GhostMenuHelper.registerPluginMenuItem();
+
+        try {
+            Class<?> drawerMenuViewClass = Class.forName("com.exteragram.messenger.drawer.DrawerMenuView");
+            tryHook("DrawerMenuView.rebuildMenu", drawerMenuViewClass, "rebuildMenu", new DrawerMenuGhostHook(), Integer.TYPE, BaseFragment.class);
+        } catch (ClassNotFoundException ignored) {
+        }
+
+        try {
+            Class<?> drawerMenuItemViewClass = Class.forName("com.exteragram.messenger.drawer.DrawerMenuItemView");
+            tryHook("DrawerMenuItemView.setMenuItem", drawerMenuItemViewClass, "setMenuItem", new XC_MethodHook() {
+                @Override
+                public void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        int id = (Integer) param.args[0];
+                        if (id == GhostMenuHelper.GHOST_MENU_ITEM_ID) {
+                            GhostMenuHelper.fixGhostIconScale((View) param.thisObject);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }, Integer.TYPE, Integer.TYPE, Integer.TYPE, CharSequence.class);
+        } catch (ClassNotFoundException ignored) {
+        }
+
+        try {
+            Class<?> appNavClass = Class.forName("com.exteragram.messenger.preferences.appearance.AppNavigationPreferencesActivity");
+            tryHook("AppNavigationPreferencesActivity.initItemDetails", appNavClass, "initItemDetails", new AppNavigationGhostEditorHook(AppNavigationGhostEditorHook.Mode.INIT_ITEM_DETAILS), new Class[0]);
+            tryHook("AppNavigationPreferencesActivity.addMenuSection", appNavClass, "addMenuSection", new AppNavigationGhostEditorHook(AppNavigationGhostEditorHook.Mode.ADD_MENU_SECTION), ArrayList.class, UniversalAdapter.class, String.class, ArrayList.class, Boolean.TYPE);
+            tryHook("AppNavigationPreferencesActivity.fillItems", appNavClass, "fillItems", new AppNavigationGhostEditorHook(AppNavigationGhostEditorHook.Mode.FILL_ITEMS), ArrayList.class, UniversalAdapter.class);
+            tryHook("AppNavigationPreferencesActivity.onClick", appNavClass, "onClick", new AppNavigationGhostEditorHook(AppNavigationGhostEditorHook.Mode.ON_CLICK), UItem.class, View.class, Integer.TYPE, Float.TYPE, Float.TYPE);
+            tryHook("AppNavigationPreferencesActivity.updateConfigFromReorder", appNavClass, "updateConfigFromReorder", new AppNavigationGhostEditorHook(AppNavigationGhostEditorHook.Mode.UPDATE_REORDER), Integer.TYPE, ArrayList.class);
+            tryHook("AppNavigationPreferencesActivity.resetToDefault", appNavClass, "resetToDefault", new AppNavigationGhostEditorHook(AppNavigationGhostEditorHook.Mode.RESET_TO_DEFAULT), new Class[0]);
+        } catch (ClassNotFoundException ignored) {
+        }
+
+        try {
+            activeAccountObserver = new NotificationCenter.NotificationCenterDelegate() {
+                @Override
+                public void didReceivedNotification(int id, int account, Object... args) {
+                    if (id == NotificationCenter.activeAccountChanged) {
+                        try {
+                            int newAccount = account >= 0 ? account : UserConfig.selectedAccount;
+                            ConnectionsManager cm = ConnectionsManager.getInstance(newAccount);
+                            if (cm != null) {
+                                cm.checkConnection();
+                                cm.resumeNetworkMaybe();
+                            }
+                            if (Settings.getHideOnlineWithGhost()) {
+                                GhostMenuHelper.syncOnlineStatus(newAccount);
+                            }
+                        } catch (Throwable t) {
+                            Main.log("activeAccountChanged observer error: %s", t.getMessage());
+                        }
+                    }
+                }
+            };
+            NotificationCenter.getGlobalInstance().addObserver(activeAccountObserver, NotificationCenter.activeAccountChanged);
+        } catch (Throwable t) {
+            Main.log("Failed to register activeAccountObserver: %s", t.getMessage());
+        }
+    }
+
+    private void registerFileLoadedObserver() {
+        try {
+            fileLoadedObserver = new NotificationCenter.NotificationCenterDelegate() {
+                @Override
+                public void didReceivedNotification(int id, int account, Object... args) {
+                    if (id != NotificationCenter.fileLoaded || args == null || args.length < 2) {
+                        return;
+                    }
+                    if (args[0] instanceof String && args[1] instanceof java.io.File) {
+                        com.xenomz.xe_extera.hooks.storyviewer.StorySaveHooks.onFileLoaded(
+                                (String) args[0], (java.io.File) args[1]);
+                    }
+                }
+            };
+            for (int account = 0; account < UserConfig.MAX_ACCOUNT_COUNT; account++) {
+                if (!UserConfig.getInstance(account).isClientActivated()) {
+                    continue;
+                }
+                try {
+                    NotificationCenter.getInstance(account).addObserver(fileLoadedObserver, NotificationCenter.fileLoaded);
+                    fileLoadedAccounts.add(account);
+                } catch (Throwable t) {
+                    Main.log("registerFileLoadedObserver(%d) failed: %s", account, t.getMessage());
+                }
+            }
+        } catch (Throwable t) {
+            Main.log("registerFileLoadedObserver failed: %s", t.getMessage());
+        }
+    }
+
+    private void unregisterFileLoadedObserver() {
+        if (fileLoadedObserver != null) {
+            for (Integer account : fileLoadedAccounts) {
+                try {
+                    NotificationCenter.getInstance(account).removeObserver(fileLoadedObserver, NotificationCenter.fileLoaded);
+                } catch (Throwable ignored) {
+                }
+            }
+            fileLoadedObserver = null;
+        }
+        fileLoadedAccounts.clear();
+    }
+
+    public void onUnload() {
+        isActive = false;
+        unregisterFileLoadedObserver();
+        if (this.activeAccountObserver != null) {
+            try {
+                NotificationCenter.getGlobalInstance().removeObserver(this.activeAccountObserver, NotificationCenter.activeAccountChanged);
+            } catch (Throwable ignored) {
+            }
+            this.activeAccountObserver = null;
+        }
+        if (this.sendRequestHook != null) {
+            try {
+                this.sendRequestHook.unhook();
+            } catch (Throwable e) {
+                Main.log("Failed to unhook sendRequestHook: %s", e.getMessage());
+            }
+            this.sendRequestHook = null;
+        }
+        for (XC_MethodHook.Unhook hook : this.hooks) {
+            try {
+                hook.unhook();
+            } catch (Throwable e) {
+                Main.log("Failed to unhook: %s", e.getMessage());
+            }
+        }
+        this.hooks.clear();
+        PreventDeletedStreamLoop.clear();
+        GhostMenuHelper.unregisterPluginMenuItem();
+    }
+}

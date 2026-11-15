@@ -1,0 +1,166 @@
+package com.xenomz.xe_extera.utils;
+
+import android.content.Context;
+import com.xenomz.xe_extera.utils.Res;
+import android.graphics.drawable.Drawable;
+import android.view.View;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import androidx.core.content.ContextCompat;
+import com.xenomz.xe_extera.localization.Localization;
+import com.xenomz.xe_extera.settings.Settings;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.R;
+import org.telegram.ui.ActionBar.ActionBarMenuItem;
+import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
+import org.telegram.ui.ActionBar.ActionBarPopupWindow;
+import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.PopupSwipeBackLayout;
+
+public class ExceptionsPopupWrapper {
+    public TextView textView;
+    public final ActionBarPopupWindow.ActionBarPopupWindowLayout windowLayout;
+
+    public interface Callback {
+        void dismiss();
+
+        void finallyRemoveAllDeletedMessages();
+
+        void openReading();
+
+        void openTyping();
+
+        void openDeletedExclusion();
+
+        void showDeletedMessages();
+
+        void showFilteredPosts();
+
+        void openFilterSettings();
+    }
+
+    private Drawable getResizedDelete(Context context) {
+        Drawable drawable = null;
+        try {
+            drawable = ContextCompat.getDrawable(context, Res.drawable("msg_delete_filled", R.drawable.msg_delete_filled));
+        } catch (Throwable t) {
+        }
+        if (drawable == null) {
+            drawable = ContextCompat.getDrawable(context, Res.drawable("msg_delete", R.drawable.msg_delete));
+        }
+        if (drawable != null) {
+            drawable = drawable.mutate();
+            drawable.setBounds(0, 0, 20, 20);
+        }
+        return drawable;
+    }
+
+    public void addGap(int id, ActionBarPopupWindow.ActionBarPopupWindowLayout popupLayout, Theme.ResourcesProvider resourcesProvider) {
+        View cell = new View(popupLayout.getContext());
+        cell.setBackgroundColor(resourcesProvider.getColor(Theme.key_chat_messagePanelBackground));
+        cell.setTag(Integer.valueOf(id));
+        cell.setTag(Res.id("object_tag", R.id.object_tag), 1);
+        cell.setTag(Res.id("fit_width_tag", R.id.fit_width_tag), 1);
+        popupLayout.addView(cell);
+        LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) cell.getLayoutParams();
+        if (LocaleController.isRTL) {
+            layoutParams.gravity = 5;
+        }
+        layoutParams.width = -1;
+        layoutParams.height = AndroidUtilities.dp(8.0f);
+        cell.setLayoutParams(layoutParams);
+    }
+
+    public ExceptionsPopupWrapper(Context context, final PopupSwipeBackLayout swipeBackLayout, final Callback callback, Theme.ResourcesProvider resourcesProvider) {
+        this.windowLayout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(context, 0, resourcesProvider);
+        this.windowLayout.setFitItems(true);
+        if (swipeBackLayout != null) {
+            ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("msg_arrow_back", R.drawable.msg_arrow_back), LocaleController.getString(Res.string("Back", R.string.Back)), false, resourcesProvider).setOnClickListener(new View.OnClickListener() { 
+                @Override // android.view.View.OnClickListener
+                public final void onClick(View view) {
+                    swipeBackLayout.closeForeground();
+                }
+            });
+        }
+        ActionBarMenuSubItem itemReading = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("msg_archive_hide", R.drawable.msg_archive_hide), Localization.EXCEPTION_READING_TEXT, false, resourcesProvider);
+        itemReading.setOnClickListener(new View.OnClickListener() { 
+            @Override // android.view.View.OnClickListener
+            public final void onClick(View view) {
+                ExceptionsPopupWrapper.lambda$new$1(callback, view);
+            }
+        });
+        ActionBarMenuSubItem itemTyping = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("floating_pencil", R.drawable.floating_pencil), Localization.EXCEPTION_TYPING_TEXT, false, resourcesProvider);
+        itemTyping.setOnClickListener(new View.OnClickListener() { 
+            @Override // android.view.View.OnClickListener
+            public final void onClick(View view) {
+                ExceptionsPopupWrapper.lambda$new$2(callback, view);
+            }
+        });
+        ActionBarMenuSubItem itemDeleted = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("msg_delete", R.drawable.msg_delete), Localization.EXCEPTION_DELETED_TEXT, false, resourcesProvider);
+        itemDeleted.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public final void onClick(View view) {
+                callback.dismiss();
+                callback.openDeletedExclusion();
+            }
+        });
+        ActionBarMenuSubItem itemViewDeleted = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("chats_archive", R.drawable.chats_archive), Localization.VIEW_DELETED, false, resourcesProvider);
+        itemViewDeleted.setOnClickListener(new View.OnClickListener() { 
+            @Override // android.view.View.OnClickListener
+            public final void onClick(View view) {
+                ExceptionsPopupWrapper.lambda$new$3(callback, view);
+            }
+        });
+        if (Settings.getFiltersEnabled()) {
+            if (Settings.getShowFilteredPostsInChat()) {
+                ActionBarMenuSubItem itemFilteredPosts = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("msg_log", R.drawable.msg_log), Localization.FILTERED_POSTS_MENU, false, resourcesProvider);
+                itemFilteredPosts.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View view) {
+                        callback.dismiss();
+                        callback.showFilteredPosts();
+                    }
+                });
+            }
+            if (Settings.getShowFilterSettingsInChat()) {
+                ActionBarMenuSubItem itemFilterSettings = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("msg_edit", R.drawable.msg_edit), Localization.FILTER_SETTINGS_MENU, false, resourcesProvider);
+                itemFilterSettings.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View view) {
+                        callback.dismiss();
+                        callback.openFilterSettings();
+                    }
+                });
+            }
+        }
+        addGap(9992, this.windowLayout, resourcesProvider);
+        ActionBarMenuSubItem itemFinallyDelete = ActionBarMenuItem.addItem(this.windowLayout, Res.drawable("msg_clear", R.drawable.msg_clear), Localization.CLEAR_DELETED, false, resourcesProvider);
+        itemFinallyDelete.setOnClickListener(new View.OnClickListener() { 
+            @Override // android.view.View.OnClickListener
+            public final void onClick(View view) {
+                ExceptionsPopupWrapper.lambda$new$4(callback, view);
+            }
+        });
+    }
+
+    static /* synthetic */ void lambda$new$1(Callback callback, View v) {
+        callback.dismiss();
+        callback.openReading();
+    }
+
+    static /* synthetic */ void lambda$new$2(Callback callback, View v) {
+        callback.dismiss();
+        callback.openTyping();
+    }
+
+    static /* synthetic */ void lambda$new$3(Callback callback, View v) {
+        callback.dismiss();
+        callback.showDeletedMessages();
+    }
+
+    static /* synthetic */ void lambda$new$4(Callback callback, View v) {
+        callback.dismiss();
+        callback.finallyRemoveAllDeletedMessages();
+    }
+}

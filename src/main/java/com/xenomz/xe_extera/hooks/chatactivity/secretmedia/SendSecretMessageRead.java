@@ -1,0 +1,20 @@
+package com.xenomz.xe_extera.hooks.chatactivity.secretmedia;
+
+import de.robv.android.xposed.XC_MethodHook;
+import com.xenomz.xe_extera.settings.Settings;
+
+public class SendSecretMessageRead extends XC_MethodHook {
+    public void beforeHookedMethod(XC_MethodHook.MethodHookParam param) {
+        if (Settings.getSaveOneTimeMessages()) {
+            param.setResult(new Runnable() { 
+                @Override // java.lang.Runnable
+                public final void run() {
+                    SendSecretMessageRead.lambda$beforeHookedMethod$0();
+                }
+            });
+        }
+    }
+
+    static /* synthetic */ void lambda$beforeHookedMethod$0() {
+    }
+}

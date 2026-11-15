@@ -1,0 +1,7 @@
+__id__ = "re_extera_loader"
+__name__ = "xenomz's xe:extera"
+__description__ = "Actively maintained FOSS fork. Enable ghost mode, save deleted messages and more!"
+__author__ = "@xenomzne"
+__version__ = "2.9.2"
+__icon__ = "myadestes_1_amashiro_natsuki_plus_nacho_neko/30"
+__min_version__ = "12.8.1"

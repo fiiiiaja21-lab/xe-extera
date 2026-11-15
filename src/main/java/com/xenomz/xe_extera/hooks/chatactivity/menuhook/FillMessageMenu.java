@@ -1,0 +1,127 @@
+package com.xenomz.xe_extera.hooks.chatactivity.menuhook;
+
+import de.robv.android.xposed.XC_MethodHook;
+import com.xenomz.xe_extera.utils.Res;
+import java.util.ArrayList;
+import com.xenomz.xe_extera.db.ReExteraDb;
+import com.xenomz.xe_extera.hooks.connectionsmanager.SendRequest;
+import com.xenomz.xe_extera.localization.Localization;
+import com.xenomz.xe_extera.settings.Settings;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.R;
+import org.telegram.tgnet.TLRPC;
+
+public class FillMessageMenu extends XC_MethodHook {
+    private final ThreadLocal<TLRPC.Message> modifiedLocal = new ThreadLocal<>();
+
+    @Override
+    public void beforeHookedMethod(XC_MethodHook.MethodHookParam param) {
+        if (!Settings.noForward()) {
+            return;
+        }
+        MessageObject msgObj = param.args != null && param.args.length > 0 && param.args[0] instanceof MessageObject ? (MessageObject) param.args[0] : null;
+        if (msgObj != null && msgObj.messageOwner != null && msgObj.messageOwner.noforwards) {
+            msgObj.messageOwner.noforwards = false;
+            modifiedLocal.set(msgObj.messageOwner);
+        }
+    }
+
+    @Override
+    public void afterHookedMethod(XC_MethodHook.MethodHookParam param) {
+        TLRPC.Message modifiedOwner = modifiedLocal.get();
+        modifiedLocal.remove();
+        if (modifiedOwner != null) {
+            modifiedOwner.noforwards = true;
+        }
+        MessageObject msgObj = (MessageObject) param.args[0];
+        ProcessSelectedOption.selectedObject = msgObj;
+        ArrayList<Integer> icons = (ArrayList) param.args[1];
+        ArrayList<CharSequence> items = (ArrayList) param.args[2];
+        ArrayList<Integer> options = (ArrayList) param.args[3];
+        boolean oneTime = msgObj.isSecret() || msgObj.isSecretMedia() || msgObj.isVoiceOnce() || msgObj.isRoundOnce();
+        if (Settings.getSaveEditedMessages() && ReExteraDb.get().messageHasSavedEdits(msgObj)) {
+            icons.add(0, Integer.valueOf(Res.drawable("menu_premium_clock", R.drawable.menu_premium_clock)));
+            items.add(0, Localization.MESSAGE_HISTORY);
+            options.add(0, Integer.valueOf(ProcessSelectedOption.OPT_MESSAGE_HISTORY));
+        }
+        if (msgObj.isOut() && Settings.getSaveReadDate()) {
+            int readDate = ReExteraDb.get().getReadDate(msgObj.getDialogId(), msgObj.getId());
+            if (readDate > 0) {
+                String timeStr = new java.text.SimpleDateFormat("HH:mm").format(new java.util.Date(readDate * 1000L));
+                icons.add(0, Integer.valueOf(Res.drawable("msg_info", R.drawable.msg_info))); // fallback icon
+                items.add(0, String.format(Localization.READ_AT, timeStr));
+                options.add(0, Integer.valueOf(ProcessSelectedOption.OPT_READ_AT));
+            }
+        }
+        boolean hideReading = Settings.getHideReadingWithGhost() || SendRequest.getCurrentReadingStatus() == -1;
+        boolean alwaysRead = SendRequest.getCurrentReadingStatus() == 1;
+        if (((hideReading && !alwaysRead) || oneTime) && !msgObj.isOut()) {
+            icons.add(0, Integer.valueOf(Res.drawable("msg_markread", R.drawable.msg_markread)));
+            items.add(0, Localization.READ_MESSAGE);
+            options.add(0, Integer.valueOf(ProcessSelectedOption.OPT_READ_MESSAGE));
+        }
+        if (Settings.getSaveOneTimeMessages() && oneTime) {
+            appendSaveOptions(msgObj, icons, items, options);
+        } else if (Settings.noForward()) {
+            if (!options.contains(2)) {
+                items.add(LocaleController.getString(Res.string("Forward", R.string.Forward)));
+                options.add(2);
+                icons.add(Integer.valueOf(Res.drawable("msg_forward", R.drawable.msg_forward)));
+            }
+            if (!options.contains(3) && (msgObj.messageOwner != null && msgObj.messageOwner.message != null || msgObj.caption != null)) {
+                items.add(LocaleController.getString(Res.string("Copy", R.string.Copy)));
+                options.add(3);
+                icons.add(Integer.valueOf(Res.drawable("msg_copy", R.drawable.msg_copy)));
+            }
+        }
+        if (Settings.getFiltersEnabled() && (msgObj.messageOwner != null && msgObj.messageOwner.message != null || msgObj.messageText != null)) {
+            if (Settings.getShowCheckFiltersInMenu()) {
+                icons.add(Integer.valueOf(Res.drawable("msg_search", R.drawable.msg_search)));
+                items.add(Localization.TEST_FILTERS_MESSAGE_MENU);
+                options.add(Integer.valueOf(ProcessSelectedOption.OPT_CHECK_FILTERS));
+            }
+            if (Settings.getShowAddToFiltersInMenu()) {
+                icons.add(Integer.valueOf(Res.drawable("msg_add", R.drawable.msg_add)));
+                items.add(Localization.ADD_TO_FILTERS);
+                options.add(Integer.valueOf(ProcessSelectedOption.OPT_ADD_TO_FILTERS));
+            }
+        }
+    }
+
+    private static void appendSaveOptions(MessageObject msgObj, ArrayList<Integer> icons, ArrayList<CharSequence> items, ArrayList<Integer> options) {
+        if (!options.contains(2)) {
+            items.add(LocaleController.getString(Res.string("Forward", R.string.Forward)));
+            options.add(2);
+            icons.add(Integer.valueOf(Res.drawable("msg_forward", R.drawable.msg_forward)));
+        }
+        if (msgObj.isVideo()) {
+            addSaveEntry(items, options, icons, Res.string("SaveToGallery", R.string.SaveToGallery), 4, Res.drawable("msg_gallery", R.drawable.msg_gallery));
+            addSaveEntry(items, options, icons, Res.string("ShareFile", R.string.ShareFile), 6, Res.drawable("msg_shareout", R.drawable.msg_shareout));
+            return;
+        }
+        if (msgObj.isMusic()) {
+            addSaveEntry(items, options, icons, Res.string("SaveToMusic", R.string.SaveToMusic), 10, Res.drawable("msg_download", R.drawable.msg_download));
+            addSaveEntry(items, options, icons, Res.string("ShareFile", R.string.ShareFile), 6, Res.drawable("msg_shareout", R.drawable.msg_shareout));
+        } else {
+            if (msgObj.getDocument() != null) {
+                if (MessageObject.isNewGifDocument(msgObj.getDocument())) {
+                    addSaveEntry(items, options, icons, Res.string("SaveToGIFs", R.string.SaveToGIFs), 11, Res.drawable("msg_gif", R.drawable.msg_gif));
+                }
+                addSaveEntry(items, options, icons, Res.string("SaveToDownloads", R.string.SaveToDownloads), 10, Res.drawable("msg_download", R.drawable.msg_download));
+                addSaveEntry(items, options, icons, Res.string("ShareFile", R.string.ShareFile), 6, Res.drawable("msg_shareout", R.drawable.msg_shareout));
+                return;
+            }
+            addSaveEntry(items, options, icons, Res.string("SaveToGallery", R.string.SaveToGallery), 4, Res.drawable("msg_gallery", R.drawable.msg_gallery));
+        }
+    }
+
+    private static void addSaveEntry(ArrayList<CharSequence> items, ArrayList<Integer> options, ArrayList<Integer> icons, int labelRes, int optionId, int iconRes) {
+        if (options.contains(Integer.valueOf(optionId))) {
+            return;
+        }
+        items.add(LocaleController.getString(labelRes));
+        options.add(Integer.valueOf(optionId));
+        icons.add(Integer.valueOf(iconRes));
+    }
+}
